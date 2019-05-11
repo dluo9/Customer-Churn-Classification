@@ -1,0 +1,227 @@
+---
+title: "Customer Churn Project"
+author: "Daniel Luo"
+date: "1/13/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Customer Churn Project
+
+This my project in analyzing customer churn using data from a Telecommunications Company that I loaded from Kaggle. The goal is to create a classifier to determine which types of customers are most likely to churn. This gives the telecommunications company a way to target which types of people need special attention to increase their lifetime value.
+
+## Loading in the Data
+
+```{r}
+library(caret)
+library(kernlab)
+
+
+churn.dataframe <- read.csv("/Users/danielluo/data/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+churn.dataframe <- na.exclude(churn.dataframe)
+head(churn.dataframe)
+dim(churn.dataframe)
+```
+
+There are 7032 observations, each with 21 attributes. This makes the dataset fairly large, but not too large that computing power would be a problem. Because of this, I'm not going to pull out random samples to make the dataset more mobile. I'll just use the whole dataset.
+
+## Functions to Preprocess Data
+
+Many of the attributes of the data are non-numeric, so I made a function that can broadly be used to extract numeric attributes to be used separately. This will be used later in the project.
+
+```{r}
+convert.numeric <- function(dataframe){
+  numeric.dataframe <- lapply(dataframe, as.numeric)
+  numeric.dataframe <- data.frame(numeric.dataframe)
+  return(numeric.dataframe)
+}
+```
+
+## Summary of Data
+
+Now that our functions are loaded, we can dive into a surface analysis of the data. I used built-in R functions to look at potential obvious correlations.
+
+```{r}
+# generic summary of data
+summary(churn.dataframe)
+```
+
+A few things to note. Pretty much 50/50 split male female. Smaller proportion of senior citizens. About 1/2 share the account with one other person, and 2/7 share it with a family. Majority of people have phone service.
+
+1520 people don't have internet service and so a lot of the attributes don't apply to these people ex. "Online Security", these people should eventually be pulled out of the data to get more attributes to correlate.
+
+This shows they have a 26.5% churn rate in the period this data was collected. This is interesting because even if the period was extremely long, telecommunications is a necessity for most people and is not an easily substitutable product. Switching carriers tends to be a lot of work on the consumer side. If a company like Netflix or Amazon Prime had a 26.5% churn rate, it would be more understandable because they're not necessities. However, this telecommuncations company has a 26.5% churn rate, which warrants concern.
+
+## Customers with Internet Service
+
+Moving on, I'm now converting all the attributes that are binary (Yes or No) into numerics (0 or 1), in order to draw basic numeric correlations between the attributes. It won't make sense to try to find a mathematical relationship between a categorical variable like type of PaymentMethod to Churn. This isn't to say a relationship doesn't exist, just that creating a mathematical model is a bit more complex when your variables are "Credit Card" or "Electronic Check" vs. actual numbers.
+
+I'm also pulling out the customers without internet service first in order to utilize more of the binary variables, like "Online Security".
+
+```{r}
+churn.internet.data <- churn.dataframe[!(churn.dataframe$InternetService == "No"),]
+churn.internet.data <- droplevels(churn.internet.data)
+
+
+head(churn.internet.data)
+
+# convert Yes and No into 1 and 1 and take out categorical variables that aren't binary
+churn.internet.data.numeric <- churn.internet.data[,-c(1,2,8,9,16,18)] # this was done manually by looking at which variables are non-binary categorical
+# convert all binaries into 2 and 1
+churn.internet.data.numeric <- convert.numeric(churn.internet.data.numeric)
+head(churn.internet.data.numeric)
+```
+
+I'm aware that the 1 and 2 isn't the typical binary 0 and 1. But for the purposes of logistic regression (which will be done after this), it doesn't really matter. It will take into account the relationship between variables relative to each other and it won't necessarily matter the actual value of the variables.
+
+## Surface Analysis of Data
+
+I first used a pairs function which is useful for smaller dataframe to see relationships but when there are 15 attributes with 7000 observations, the function takes a lot of computational power and the resultings graphs aren't useful.
+
+I instead used the cor() function to create a matrix of linear correlations between the variables
+
+```{r}
+# pairs(churn.internet.data.numeric)
+# not helpful, simply too much data to get a helpful representation and took forever
+
+# general correlation matrix, not super easy read
+cor(churn.internet.data.numeric)
+
+
+
+# specifically correlations to churn, which is what we care most about
+cor(churn.internet.data.numeric)[,15]
+```
+
+No obvious correlations exist, the strongest correlations with churn are its negative relationship with tenure with churn, followed by online security and tech support. This demonstrates that an increase in tenure correlates with a decrease in churn rate, which demonstrates company loyalty.
+
+Online security and tech support demonstrate that perhaps these products are responsible for a slight increase in a satisfaction that discourages churn later on.
+
+Again, these correlations are not extremely strong so these claims should be taken somewhat lightly.
+
+## Logistic Regression
+
+Here I will try to use different variables to predict the churning with a logistic regression.
+
+```{r}
+# the below train function only works if the "y" variable, in this case the churn, is a factor so I reverted it back to its original state
+churn.training.data.indices <- createDataPartition(churn.internet.data$Churn, p=.7, list=FALSE)
+training <- churn.internet.data[churn.training.data.indices,]
+testing <- churn.internet.data[-churn.training.data.indices,]
+
+# the train function doesn't work for categorical variables, so I only used the numeric ones
+log.reg.fit <- train(Churn ~ gender + SeniorCitizen + Partner + Dependents + tenure
+                     + PhoneService + OnlineSecurity + OnlineBackup + DeviceProtection 
+                     + TechSupport + StreamingTV + StreamingMovies + PaperlessBilling
+                     + MonthlyCharges + TotalCharges, data = training, method="glm", family="binomial")
+exp(coef(log.reg.fit$finalModel))
+```
+
+The way this model is to be interpreted is that for example, and increase in one unit of SeniorCitizen (in this case because it is binary, I treated that as the presence of SeniorCitizen, in a other words a "Yes") increases the odds of Churn by a factor of 1.43. We see that there is also a significant relationship with PaperlessBillingYes, meaning that the presence of PaperlessBilling increases the odds of churn by a factor of 1.5.
+
+On the flip-side, those with PhoneService, OnlineSecurity, OnlineBackup, DeviceProtection, and TechSupport are less likely to churn. This may show that those with Internet Service and are paying for all these accessories like OnlineSecurity are more devoted to the brand and are less likely to churn as well.
+
+## Goodness of Fit
+
+Here I will look into whether or not these models represent a good fit. I use the model with the testing data that was partitioned separately from the training data to predict Churn. I then see if these predicted values equal the actual values of in the testing data partition.
+
+```{r}
+successful.predictions <- sum(predict(log.reg.fit, newdata=testing) == testing$Churn) 
+success.rate <- successful.predictions / length(testing$Churn)
+
+successful.predictions
+success.rate
+```
+
+This model predicts the likelihood of churn with approximately 75-80% accuracy.
+
+To think about whether this model is a good fit or not, let's pretend that the model is horrible and it only randomly selects "Yes" and "No" for Churn. This can be modeled by a binomial distribution which can be approximated by a normal distribution
+
+So probability of success = .5 and the number of trials = 1652
+
+```{r}
+p = .5
+n = 1652
+
+mean = n*p
+mean
+sd = sqrt(n*p*(1-p))
+sd
+```
+
+This shows us that the mean is 826 and the standard deviation is 20.32. With a normal distribution with mean of 826 and a standard deviation of 20.32, we calculate the z score of the model's prediction.
+
+```{r}
+z <- (successful.predictions - mean) / sd
+z
+
+probability.of.random.success <- 1 - pnorm(z)
+probability.of.random.success
+```
+
+What the above shows is that with a z score of 20-22, it is almost impossible to "randomly" achieve a success rate of 75%. The confidence interval for the number of successes not being random, is extremely close to 100%. This demonstrates the efficacy of this model isn't likely not attributed to random chance.
+
+## Conclusions
+
+The model by itself can potentially be used simply as a function to predict churn given new data in the future (of course the model should be gradually updated with new data to ensure it accuracy). However, we can generally see that variables like SeniorCitizen and PaperlessBillingYes are associated with an increased chance of churn while PhoneServiceYes is associated with a decreased chance of churn. More evidence is obviously needed but I can maybe assume that the company has a poor UI/UX because Senior Citizens and those that use PaperlessBilling are more likely to churn. These customers may be frustrated with how difficult it is to deal pay their bills and view their account settings that they decide to switch telecom companies.
+
+On the other hand, perhaps their PhoneService is really great, maybe the fastest in the area or really cheap which keeps the customer loyal to the company.
+
+## General Reflections and Improvements
+
+I recognize that this data is unrealistic in that it's already cleaned, preprocessed and formatted into a neat-csv package. In fact, whether its even from a real company is another question all together. However, I chose this dataset to work with because I felt it represents a situation that is applicable to the business world. The attributes of the data are similar to what can be seen on most types of data in consumer industry, whether it's telecom, software, or e-commerce.
+
+The code itself has room for improvement as well. I used a lot of manual methods that could undoubtedly be done more efficiently.
+
+I obviously still have a lot to learn as I'm early on in my career as a data analyst as well as a statistics major. Hopefully by the time I potentially intern for FabFitFun, I'll gotten through some more R coding coursework that would make increase my value add in the spring.
+
+## Answer to Questions
+
+**What is the business problem you are trying to solve?**
+
+Almost every company that is subscription based is trying to find ways to minimize churn. Much like in the FabFitFun business model, the telecommunications industry relies on customers continuing to stay "subscribed" to their services to order to stay profitable. One of the most direct ways to maintain high subscription levels is to predict churn and therefore minimize churn rates. By using different attributes like their tenure, usage of internet service, and age, we can create a model to predict which customers will churn. This information can be utilized into a plan of action that can target these customers to prevent their churn and maximize their lifetime value, perhaps through reaching out to to specific customers to gain feedback, free perks, etc.
+
+**How did you measure your success?**
+
+With algorithms like this, you can measure the success of your model that is created from the training data by applying it to the separated testing data to see if your predictions match with reality. My model achieved 75% accuracy which I consider not horrible but with plenty of room for improvement. If there is more data gathered in the future, the model can be trained even more with the extra data to prevent overfitting hopefully become more accurate as well.
+
+**What methods/algorithms did you end up using and why?**
+
+I used a generalized linear model where I used numeric independent variables (tenure, usage of internet service, etc.) to predict a binary dependent variable, churn. Because my dependent variable is binary (Yes or a No), this makes it a logistic regression. The model follows a formula of 
+
+  log(odds.ratio) = a0 + a1x1 + a2x2 + ... + anxn where...
+  
+  a1 through an are constants,
+  x1 through xn are different attributes like tenure,
+  odds.ratio = P(Churn = Yes) / P(Churn = No)
+    
+The training of the model involves finding which values for a0 through an create the closest prediction for churn. This is done through the train function which uses gradient descent to find the values.
+
+Then you put both sides into an exponent like below
+
+  odds.ratio = e^(a0 + a1x1 + a2x2 + ... + anxn)
+
+Then the output is a list of coefficients. These coefficients are related to how an increase of 1 in an attribute causes an increase in a factor of the coefficient of the odds ratio. For example, the coefficient for PaperlessBilling is around 1.5. So increase in 1 of PaperlessBilling is essentially moving towards a "Yes" for PaperlessBilling is associated with a 1.5x increase of odds for Churn.
+
+The reason I used a logistic regression in the first place is because it's one of most popular algorithms used to predict binary dependent variables and I thought it would create a strong model for the situation.
+
+**What problems did you run into and how did you solve them?**
+
+1. One of the biggest problems I ran into was first figuring out what model to use. I didn't know that much about machine learning or computer algorithms but through research I eventually learned about the logistic regression and I decided it would be appropriate to use. After that I had figure out how actually implement the algorithm. With more research I discovered the caret package that had a lot helpful built-in functions and documentation that I utilized heavily to learn how to create the model.
+
+2. After that I had to pre-process the data. The data was already quite clean but I did have to remove some of the categorical variables that weren't binary. I struggled with an efficient way to do so but eventually figured out a method where I deleted the categorical variables and then using the apply() function, I converted the binary categorical variables into 1s and 2s. The train function doesn't work for non-numeric variables so these adjustments had to be made.
+
+3. Then there was the struggle of actually understanding the math behind the function. I did a bit more research and tried to wrap my head around how the function actually worked. I can't say for sure that I understand it 100% but I like to think I have high level understanding of how it works. I hope with future statistics classes and experience I can have a better understanding as well.
+
+**What future improvements would you like to build?**
+
+1. First off, I removed a lot of the data in order to make training the model easier but through this process I missed out on a lot of other potential trends. I didn't look into if some of the non-binary categorical variables could be strong predictors, and I didn't look into whether non-InternetService customers had particular trends to Churn. Of course, given more time this project could be more in depth by looking more deeply into variables I didn't include in this model.
+
+2. There are a TON (over 200) of other methods in the caret package that aren't a generalized linear model so I'm close to certain there is a better method that would produce better results. However, some of them are extremely complex and I just don't have enough experience or knowledge to implement them. When I gain more experience in the future I would love to come back and look into some of the other models to see if there is a better one for the situation.
+
+3. A lot of this project is extremely number heavy and not very visual, making it pretty hard to digest. In the future I would want to try and incorporate some more visuals, maybe a graph Churn as a function of PaperlessBilling to visualize how close the model is to reality. 
+
+
